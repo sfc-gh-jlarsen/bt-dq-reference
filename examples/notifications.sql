@@ -16,7 +16,8 @@
 --   ENABLED = FALSE
 --   ALLOWED_RECIPIENTS = ();
 --
--- ALTER VIEW bt_latest_batch_rowcount
+-- ALTER VIEW bt_orders_latest_batch
 --   MODIFY DATA METRIC FUNCTION SNOWFLAKE.CORE.ROW_COUNT ON ()
---   MODIFY EXPECTATION rows_800_to_1200 (VALUE BETWEEN 800 AND 1200);
+--   MODIFY EXPECTATION rows_800_to_1200 (800 <= VALUE AND VALUE <= 1200);
+-- -- BETWEEN is not in the documented expectation operator list.
 -- -- DATA_QUALITY_NOTIFICATION is not attached. See docs before adding it.

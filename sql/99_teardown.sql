@@ -1,44 +1,50 @@
 -- 99_teardown.sql
--- Drops the objects this demo created. Does not drop the schema.
+-- Drops the objects this demo created, then drops the demo schema.
 -- Does not drop the database. Does not drop the warehouse.
 --
--- The database and the schema are provisioned for the demo and stay when
--- the demo is done. Ownership of both is outside this repo. Do not grant
--- yourself that ownership to widen the drop.
+-- BT_BUILDER_ROLE owns the schema, so DROP SCHEMA succeeds.
+-- The database was provisioned for the demo and stays when the demo is done.
+-- Never DROP DATABASE.
+--
+-- BT_WH may be shared with other demos. Suspend it. Never drop it.
+-- Suspend is last so the drops above still have a running warehouse.
+-- Dropping the DMF associations is what stops serverless billing. A suspended
+-- warehouse does not stop those schedules.
+--
+-- This file is not part of the proof. Do not run it until the proof is kept.
 
 -- Target names come from config/target.sql ($demo_db, $demo_schema).
--- Run that file first in the same session. Do not hardcode the database here.
+-- Run that file first in the same session. No database name is hardcoded here.
 
 USE ROLE BT_BUILDER_ROLE;
 USE WAREHOUSE BT_WH;
 USE DATABASE IDENTIFIER($demo_db);
 USE SCHEMA IDENTIFIER($demo_schema);
 
-ALTER WAREHOUSE BT_WH SUSPEND;
-
 -- Listing is the record of what this demo owns. Printed before the drops.
--- These SHOW statements use the session database and schema from above.
 SHOW TABLES;
 SHOW VIEWS;
 
-USE SCHEMA IDENTIFIER($demo_schema);
-
-ALTER TABLE IF EXISTS bt_orders
+ALTER TABLE IF EXISTS IDENTIFIER($demo_db || '.' || $demo_schema || '.bt_orders')
   DROP DATA METRIC FUNCTION SNOWFLAKE.CORE.DUPLICATE_COUNT ON (order_id, line_no);
-ALTER VIEW IF EXISTS bt_orders_latest_batch
+ALTER VIEW IF EXISTS IDENTIFIER($demo_db || '.' || $demo_schema || '.bt_orders_latest_batch')
   DROP DATA METRIC FUNCTION SNOWFLAKE.CORE.ROW_COUNT ON ();
-ALTER VIEW IF EXISTS bt_orders_latest_freshness
+ALTER VIEW IF EXISTS IDENTIFIER($demo_db || '.' || $demo_schema || '.bt_orders_latest_freshness')
   DROP DATA METRIC FUNCTION SNOWFLAKE.CORE.FRESHNESS ON (load_ts);
 
-DROP VIEW IF EXISTS bt_orders_latest_freshness;
-DROP VIEW IF EXISTS bt_orders_latest_batch;
-DROP TABLE IF EXISTS bt_orders;
-DROP TABLE IF EXISTS bt_load_ledger;
-DROP TABLE IF EXISTS bt_batch_id;
+DROP VIEW IF EXISTS IDENTIFIER($demo_db || '.' || $demo_schema || '.bt_orders_latest_freshness');
+DROP VIEW IF EXISTS IDENTIFIER($demo_db || '.' || $demo_schema || '.bt_orders_latest_batch');
+DROP TABLE IF EXISTS IDENTIFIER($demo_db || '.' || $demo_schema || '.bt_orders');
+DROP TABLE IF EXISTS IDENTIFIER($demo_db || '.' || $demo_schema || '.bt_load_ledger');
+DROP TABLE IF EXISTS IDENTIFIER($demo_db || '.' || $demo_schema || '.bt_batch_id');
 
 -- Examples stay commented, so these objects are not created by this repo.
 -- Uncomment only if you created them by hand.
 -- DROP TASK IF EXISTS bt_baseline_task;
 -- DROP NOTIFICATION INTEGRATION IF EXISTS bt_dq_notify;
---
--- The schema and the database stay. They were provisioned for the demo.
+
+-- Schema only. The database stays.
+DROP SCHEMA IF EXISTS IDENTIFIER($demo_db || '.' || $demo_schema);
+
+-- Shared warehouse. Suspend, never drop. Last, after the drops above.
+ALTER WAREHOUSE BT_WH SUSPEND;

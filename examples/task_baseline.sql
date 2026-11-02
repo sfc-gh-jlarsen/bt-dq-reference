@@ -24,8 +24,13 @@
 --     UPDATE bt_batch_id SET id = id + 1;
 --     DELETE FROM bt_orders;
 --     INSERT INTO bt_orders (order_id, line_no, sku, qty, load_ts, batch_id)
---     SELECT SEQ4() + 1, 1, 'SKU-' || LPAD((SEQ4() + 1)::VARCHAR, 6, '0'), 1,
---            CURRENT_TIMESTAMP(), (SELECT id FROM bt_batch_id)
+--     SELECT
+--       FLOOR((ROW_NUMBER() OVER (ORDER BY SEQ4()) - 1) / 5) + 1,
+--       MOD(ROW_NUMBER() OVER (ORDER BY SEQ4()) - 1, 5) + 1,
+--       'SKU-' || LPAD(TO_VARCHAR(FLOOR((ROW_NUMBER() OVER (ORDER BY SEQ4()) - 1) / 5) + 1), 6, '0'),
+--       1,
+--       CURRENT_TIMESTAMP(),
+--       (SELECT id FROM bt_batch_id)
 --     FROM TABLE(GENERATOR(ROWCOUNT => 1000));
 --     INSERT INTO bt_load_ledger (batch_id, batch_name, attempted_at, row_count, note)
 --     SELECT id, 'good', CURRENT_TIMESTAMP()::TIMESTAMP_NTZ, 1000, 'baseline'

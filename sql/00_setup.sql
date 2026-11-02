@@ -26,8 +26,9 @@ USE WAREHOUSE BT_WH;
 USE DATABASE IDENTIFIER($demo_db);
 USE SCHEMA IDENTIFIER($demo_schema);
 
--- One-row counter. BT_BUILDER_ROLE has CREATE TABLE, not CREATE SEQUENCE.
--- Incremented inside the load transaction, so an empty load still gets an id.
+-- One-row counter. Incremented inside the load transaction, so an empty
+-- load still gets an id. Reset sets it back to 0, so the values are
+-- monotonic within a run, not across runs.
 CREATE TABLE IF NOT EXISTS bt_batch_id (
   id NUMBER NOT NULL
 )

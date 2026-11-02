@@ -34,8 +34,8 @@ ALTER VIEW bt_orders_latest_batch
     EXPECTATION rows_800_to_1200 (800 <= VALUE AND VALUE <= 1200);
 
 -- Freshness on its own object so the cron does not also reschedule ROW_COUNT.
--- Expectation is age under 900 seconds. Proof uses bt_age_latest_load,
--- not a sleep.
+-- Expectation is age under 900 seconds. The proof inserts a load_ts that is
+-- already 3600 seconds old. It does not sleep and it does not call a procedure.
 ALTER VIEW bt_orders_latest_freshness SET
   DATA_METRIC_SCHEDULE = 'USING CRON 0 * * * * UTC';
 
