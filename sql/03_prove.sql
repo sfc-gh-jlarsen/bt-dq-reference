@@ -72,12 +72,13 @@ SELECT id, 'good', CURRENT_TIMESTAMP()::TIMESTAMP_NTZ, 1000, 'synthetic load'
 FROM bt_batch_id;
 COMMIT;
 
--- DUPLICATE_COUNT(order_id) counts distinct values that occur more than
--- once (docs, 2026-11-02: "count of column values that have duplicates").
--- Every good row already shares its order_id across lines 1..5, so that
--- number does not move when the replay adds another copy of the same values.
--- The contrast therefore reads order_id from line_no = 1 only. The pair
--- check is the scan, which reads every line.
+-- DUPLICATE_COUNT accepts a query over a table, not a subquery and not a
+-- WHERE inside the argument (both fail: "table-like objects" or
+-- DUPLICATE_COUNT$V1 (NUMBER)). line_no = 1 is copied into a temp table so
+-- the direct call has one column of one line. The pair check is the scan.
+
+CREATE OR REPLACE TEMPORARY TABLE bt_orders_line1 AS
+SELECT order_id FROM bt_orders WHERE line_no = 1;
 
 INSERT INTO bt_proof
 SELECT
@@ -85,12 +86,10 @@ SELECT
   'none (good batch, line_no = 1 only, so order_id is unique)',
   'good batch in 03_prove.sql',
   'DUPLICATE_COUNT(order_id) on line_no = 1. Not the pair check.',
-  SNOWFLAKE.CORE.DUPLICATE_COUNT(
-    SELECT order_id FROM bt_orders WHERE line_no = 1),
+  SNOWFLAKE.CORE.DUPLICATE_COUNT(SELECT order_id FROM bt_orders_line1),
   'VALUE = 0 on this one-line slice',
   IFF(
-    SNOWFLAKE.CORE.DUPLICATE_COUNT(
-      SELECT order_id FROM bt_orders WHERE line_no = 1) = 0,
+    SNOWFLAKE.CORE.DUPLICATE_COUNT(SELECT order_id FROM bt_orders_line1) = 0,
     'PASS', 'FAIL');
 
 INSERT INTO bt_proof
@@ -151,18 +150,19 @@ SELECT id, 'duplicate_replay', CURRENT_TIMESTAMP()::TIMESTAMP_NTZ, 1000, 'synthe
 FROM bt_batch_id;
 COMMIT;
 
+CREATE OR REPLACE TEMPORARY TABLE bt_orders_line1 AS
+SELECT order_id FROM bt_orders WHERE line_no = 1;
+
 INSERT INTO bt_proof
 SELECT
   'duplicate_keys_order_id',
   'replay of line_no = 1. Still not the pair.',
   'duplicate_replay batch in 03_prove.sql',
   'DUPLICATE_COUNT(order_id) on line_no = 1. Not the pair check.',
-  SNOWFLAKE.CORE.DUPLICATE_COUNT(
-    SELECT order_id FROM bt_orders WHERE line_no = 1),
+  SNOWFLAKE.CORE.DUPLICATE_COUNT(SELECT order_id FROM bt_orders_line1),
   'VALUE = 0 on this one-line slice',
   IFF(
-    SNOWFLAKE.CORE.DUPLICATE_COUNT(
-      SELECT order_id FROM bt_orders WHERE line_no = 1) = 0,
+    SNOWFLAKE.CORE.DUPLICATE_COUNT(SELECT order_id FROM bt_orders_line1) = 0,
     'PASS', 'FAIL');
 
 INSERT INTO bt_proof
