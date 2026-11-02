@@ -14,7 +14,7 @@ ALTER SCHEMA some_schema
 
 Source: https://docs.snowflake.com/en/user-guide/data-quality-schema-level
 
-That statement is not in `sql/`. Running it would start serverless training and scheduled evaluations on every supported object in the schema. `BT_DQ_REF.BT_DQ_REF` is small, but the cost is real and the feature is account-wide in its effect on those objects.
+That statement is not in `sql/`. Running it would start serverless training and scheduled evaluations on every supported object in the schema. The demo schema is small, but the cost is real and the feature applies to each supported object in it.
 
 ## Why this repo does not turn it on
 

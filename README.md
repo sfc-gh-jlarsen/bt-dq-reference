@@ -18,22 +18,27 @@ The business key is `(order_id, line_no)`. `load_ts` is not part of that key, so
 
 ## Walkthrough
 
-`BT_BUILDER_ROLE` can create tables and views in the assigned schema. It cannot create a sequence. Batch ids come from `bt_batch_id`, a one-row table incremented inside the load transaction. An empty load still advances it. `MAX(batch_id)` on the ledger remains the definition of "latest attempt."
+The database and schema are not written in the SQL files. `config/target.sql` sets `$demo_db` and `$demo_schema`. The default in that file is `BT_DQ_REF` and `BT_DQ_REF`. Change those two assignments to retarget the scripts. Run `config/target.sql` in the same session before any file under `sql/`.
 
 ```sql
-USE ROLE BT_BUILDER_ROLE;
-USE WAREHOUSE BT_WH;
-USE DATABASE BT_DQ_REF;
-USE SCHEMA BT_DQ_REF;
+-- config/target.sql
+SET demo_db = 'BT_DQ_REF';
+SET demo_schema = 'BT_DQ_REF';
 ```
 
-Run in order. `01_generate.sql` loads every batch once, as a demonstration. `03_prove.sql` resets and loads again, so you can skip `01` if you only want the proof.
+`BT_BUILDER_ROLE` can create tables and views in that schema. It cannot create a sequence. Batch ids come from `bt_batch_id`, a one-row table incremented inside the load transaction. An empty load still advances it. `MAX(batch_id)` on the ledger remains the definition of "latest attempt."
+
+Run in order, after the config file. `01_generate.sql` loads every batch once, as a demonstration. `03_prove.sql` resets and loads again, so you can skip `01` if you only want the proof.
+
+```
+snow sql -f config/target.sql -f sql/00_setup.sql
+```
 
 1. `sql/00_setup.sql` creates the counter table, the two data tables, and the two views.
 2. `sql/01_generate.sql` runs the four batches inside transactions. It does not create a procedure.
 3. `sql/02_monitors.sql` attaches the three DMFs and their schedules.
 4. `sql/03_prove.sql` resets the tables and prints the proof. It calls `DUPLICATE_COUNT` and `FRESHNESS` directly. The row-count rows are `COUNT(*)` on the view. It does not read `DATA_QUALITY_MONITORING_RESULTS`.
-5. `sql/99_teardown.sql` suspends the warehouse, lists objects, and drops demo objects. It does not drop the database.
+5. `sql/99_teardown.sql` suspends the warehouse, lists objects, and drops the demo tables and views. It does not drop the schema. It does not drop the database.
 
 Batches, same shape in `01_generate.sql` and `03_prove.sql`:
 
@@ -76,7 +81,8 @@ Checked against Snowflake docs on 2026-11-02:
 
 ## Limitations
 
-- Schema `BT_DQ_REF.BT_DQ_REF` is owned by `ACCOUNTADMIN`. `BT_BUILDER_ROLE` has `USAGE`, `CREATE TABLE`, and `CREATE VIEW` only. It cannot create a sequence or a procedure, which is why batch ids are a one-row table and the generator is plain SQL. Teardown drops the objects the demo created. `DROP SCHEMA` fails until the owner drops it or grants ownership. The script does not elevate.
+- The database and the schema are provisioned outside this repo and stay after teardown. `99_teardown.sql` drops only the tables and views this demo created. It does not contain `DROP SCHEMA` or `DROP DATABASE`.
+- `BT_BUILDER_ROLE` has `USAGE`, `CREATE TABLE`, and `CREATE VIEW` on the schema. It cannot create a sequence or a procedure, which is why batch ids are a one-row table and the generator is plain SQL.
 - The role needs `EXECUTE DATA METRIC FUNCTION` on the account to call a system DMF. That grant is not created by this repo. It was already present on the build role.
 - `DUPLICATE_COUNT` on `(order_id, line_no)` is attached, not called. A direct call is one column. The two-column number in the proof is a SQL aggregate and is labeled as one.
 - `ROW_COUNT` is attached to the view and scheduled. The proof measures the view with `COUNT(*)` because the DMF itself cannot be called directly.

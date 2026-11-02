@@ -3,11 +3,8 @@
 -- Creates objects in the schema the caller has already selected.
 -- Does not CREATE DATABASE, CREATE WAREHOUSE, or change a resource monitor.
 --
--- Required session before this file:
---   USE ROLE BT_BUILDER_ROLE;
---   USE WAREHOUSE BT_WH;
---   USE DATABASE BT_DQ_REF;
---   USE SCHEMA BT_DQ_REF;
+-- Required session before this file: config/target.sql, which sets
+-- $demo_db and $demo_schema. This file uses those variables.
 --
 -- Docs checked 2026-11-02:
 --   https://docs.snowflake.com/en/user-guide/data-quality-working
@@ -21,10 +18,13 @@
 --   Allowed operators include = < > <= >= AND OR BETWEEN-is-not-listed;
 --   this file uses 800 <= VALUE AND VALUE <= 1200, not BETWEEN.
 
+-- Target names come from config/target.sql ($demo_db, $demo_schema).
+-- Run that file first in the same session. Do not hardcode the database here.
+
 USE ROLE BT_BUILDER_ROLE;
 USE WAREHOUSE BT_WH;
-USE DATABASE BT_DQ_REF;
-USE SCHEMA BT_DQ_REF;
+USE DATABASE IDENTIFIER($demo_db);
+USE SCHEMA IDENTIFIER($demo_schema);
 
 -- One-row counter. BT_BUILDER_ROLE has CREATE TABLE, not CREATE SEQUENCE.
 -- Incremented inside the load transaction, so an empty load still gets an id.

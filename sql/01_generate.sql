@@ -12,10 +12,13 @@
 --
 -- load_ts is not part of the duplicate key.
 
+-- Target names come from config/target.sql ($demo_db, $demo_schema).
+-- Run that file first in the same session. Do not hardcode the database here.
+
 USE ROLE BT_BUILDER_ROLE;
 USE WAREHOUSE BT_WH;
-USE DATABASE BT_DQ_REF;
-USE SCHEMA BT_DQ_REF;
+USE DATABASE IDENTIFIER($demo_db);
+USE SCHEMA IDENTIFIER($demo_schema);
 
 -- Reset. Does not consume a batch id.
 BEGIN;
