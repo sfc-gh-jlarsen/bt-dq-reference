@@ -125,3 +125,7 @@ Credits per evaluation depend on the data scanned and the rate in the Snowflake 
 ### Running the scripts
 
 The SQL files, including the direct DMF calls in `03_prove.sql`, are ordinary queries on the session warehouse (`BT_WH`). That is a few seconds of X-Small time per run, separate from Data Quality Monitoring. The same goes for the warehouse picked on the Snowsight **Data Quality** tab: it runs what you do in the UI, not the schedules.
+
+## License
+
+Apache License 2.0. See [LICENSE](LICENSE).
