@@ -6,10 +6,11 @@
 -- The database was provisioned for the demo and stays when the demo is done.
 -- Never DROP DATABASE.
 --
--- BT_WH may be shared with other demos. Suspend it. Never drop it.
+-- BT_WH may be shared with other demos. Suspend it as housekeeping so an idle
+-- shared warehouse is not left running. Never drop it.
 -- Suspend is last so the drops above still have a running warehouse.
--- Dropping the DMF associations is what stops serverless billing. A suspended
--- warehouse does not stop those schedules.
+-- The suspend is not a cost control. Dropping the DMF associations is what
+-- stops serverless billing. A suspended warehouse does not stop those schedules.
 --
 -- This file is not part of the proof. Do not run it until the proof is kept.
 
@@ -46,5 +47,6 @@ DROP TABLE IF EXISTS IDENTIFIER($demo_db || '.' || $demo_schema || '.bt_batch_id
 -- Schema only. The database stays.
 DROP SCHEMA IF EXISTS IDENTIFIER($demo_db || '.' || $demo_schema);
 
--- Shared warehouse. Suspend, never drop. Last, after the drops above.
+-- Shared warehouse. Suspend as housekeeping, never drop. Last, after the drops above.
+-- This suspend does not stop DMF billing. The association drops above do that.
 ALTER WAREHOUSE BT_WH SUSPEND;

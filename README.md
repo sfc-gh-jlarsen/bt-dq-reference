@@ -1,6 +1,6 @@
 # Data quality reference
 
-**Drop the DMF associations or they keep billing (~312 evaluations/day).** `99_teardown.sql` does that drop. A suspended warehouse does not.
+**Drop the DMF associations or they keep billing (~312 evaluations/day).** `99_teardown.sql` does that drop. Suspending the warehouse is housekeeping only and does not stop the schedules.
 
 Customer-neutral reference for three system data metric functions on synthetic order lines. The repo is the deliverable. An account deploy is a check that the SQL runs, not a second artifact.
 
@@ -41,7 +41,7 @@ SET demo_schema = 'BT_DQ_REF';
 2. `sql/01_generate.sql` runs the four batches. Optional if you only want the proof.
 3. `sql/02_monitors.sql` attaches the three DMFs and their schedules.
 4. `sql/03_prove.sql` resets the tables and prints the proof. It calls `DUPLICATE_COUNT` on `order_id` only as a contrast. The pair rows use `SYSTEM$DATA_METRIC_SCAN` on `(order_id, line_no)`. Freshness is a direct call. The row-count rows are `COUNT(*)` on the view. It does not read `DATA_QUALITY_MONITORING_RESULTS`.
-5. `sql/99_teardown.sql` is not part of the proof. It drops the DMF associations, the demo objects, and the schema named by `$demo_schema`. It does not drop the database. It suspends `BT_WH` last and never drops it, because that warehouse may be shared.
+5. `sql/99_teardown.sql` is not part of the proof. It drops the DMF associations, the demo objects, and the schema named by `$demo_schema`. It does not drop the database. It suspends `BT_WH` last, as housekeeping, and never drops it, because that warehouse may be shared. The suspend is not a cost control. Dropping the associations is what stops the schedules.
 
 Batches, same shape in `01_generate.sql` and `03_prove.sql`:
 
@@ -85,7 +85,7 @@ Checked against Snowflake docs on 2026-11-02:
 
 ## Limitations
 
-- `99_teardown.sql` drops the DMF associations, the demo tables and views, and the schema in `$demo_schema`. `BT_BUILDER_ROLE` owns that schema, which is why `DROP SCHEMA` is in the file. The database stays. There is no `DROP DATABASE` and no `DROP WAREHOUSE`. `BT_WH` may be shared: the file suspends it at the end and does not drop it.
+- `99_teardown.sql` drops the DMF associations, the demo tables and views, and the schema in `$demo_schema`. `BT_BUILDER_ROLE` owns that schema, which is why `DROP SCHEMA` is in the file. The database stays. There is no `DROP DATABASE` and no `DROP WAREHOUSE`. `BT_WH` may be shared: the file suspends it at the end, as housekeeping so an idle shared warehouse is not left running. That suspend is not a cost control. Dropping the DMF associations is what stops the schedules. The file never drops the warehouse.
 - The role needs `EXECUTE DATA METRIC FUNCTION` on the account to call a system DMF. That grant is not created by this repo. It was already present on the build role.
 - `DUPLICATE_COUNT` on more than one column cannot be called directly. The docs (checked 2026-11-02) say to associate it, and `SYSTEM$DATA_METRIC_SCAN` returns the failing rows for that combination. The proof counts those rows. `DUPLICATE_COUNT(order_id)` is printed beside it and is not the pair result, because `line_no` is not always 1.
 - `ROW_COUNT` is attached to the view and scheduled. The proof measures the view with `COUNT(*)` because the DMF itself cannot be called directly and the scan function does not accept it.
@@ -97,18 +97,25 @@ Checked against Snowflake docs on 2026-11-02:
 
 ## Cost
 
-Serverless data-quality monitoring bills when a scheduled DMF runs, not when you call one yourself. This demo attaches three schedules, so leaving them in place spends credits even if nobody runs `03_prove.sql` again.
+Monitoring is serverless. Scheduled DMF evaluations run on Snowflake-managed compute and bill as **Data Quality Monitoring**, not to any warehouse. You pay only when a scheduled DMF runs. Creating a DMF or calling one by hand is not billed as Data Quality Monitoring.
 
-No invoice line for this demo was available at authoring time. Treat the figures below as estimates, not a measurement.
+The three schedules in `02_monitors.sql` keep running, and billing, until `99_teardown.sql` drops the associations. Suspending a warehouse does not stop them.
 
-| Path | When it costs | Estimate |
-| --- | --- | --- |
-| `03_prove.sql` direct calls | Warehouse time on `BT_WH` while the script runs | One X-Small minute or less for the full script. Measure with `QUERY_HISTORY` on the build account if a number is required. |
-| `DUPLICATE_COUNT` trigger | Each DML on `bt_orders` after `02_monitors.sql` | Serverless per change. A proof run does several writes, so a scheduled evaluation can land after the script finishes. |
-| `ROW_COUNT` | Every 5 minutes for as long as the view keeps the schedule | The standing cost. 288 evaluations per day. |
-| `FRESHNESS` | Hourly cron | 24 evaluations per day. |
-| Idle warehouse | `99_teardown.sql` suspends `BT_WH` | A suspended warehouse does not bill compute. The DMF schedules are not the warehouse. They keep billing until the associations are dropped. |
+| Check | Object | Schedule | Evaluations |
+| --- | --- | --- | --- |
+| `DUPLICATE_COUNT` | `bt_orders` | `TRIGGER_ON_CHANGES` | One per DML on the table. A proof run writes several times, so evaluations can land after the script ends. |
+| `ROW_COUNT` | `bt_orders_latest_batch` | `5 MINUTE` | 288 per day, whether or not data changed. The standing cost. |
+| `FRESHNESS` | `bt_orders_latest_freshness` | `USING CRON 0 * * * * UTC` | 24 per day. |
 
-Do not read "the warehouse is suspended" as "the demo costs nothing." Drop the DMF associations (`99_teardown.sql`) to stop the serverless schedules.
+Credits per evaluation depend on the data scanned and the rate in the Snowflake Service Consumption Table. Snowflake does not publish a flat per-check figure, so this README does not give one.
 
-Credits per DMF evaluation depend on the account's serverless rate and the bytes scanned. Snowflake's data quality documentation describes the billing model; it does not publish a flat per-check credit figure, so this README does not invent one.
+### Measuring it
+
+- `SNOWFLAKE.ACCOUNT_USAGE.DATA_QUALITY_MONITORING_USAGE_HISTORY`: credits per object and time window.
+- `SNOWFLAKE.ORGANIZATION_USAGE.METERING_DAILY_HISTORY` where `SERVICE_TYPE = 'DATA_QUALITY_MONITORING'`: daily total for the account.
+
+`BT_BUILDER_ROLE` cannot read either view. Someone with `ACCOUNT_USAGE` or `ORGANIZATION_USAGE` access has to run the query.
+
+### Running the scripts
+
+The SQL files, including the direct DMF calls in `03_prove.sql`, are ordinary queries on the session warehouse (`BT_WH`). That is a few seconds of X-Small time per run, separate from Data Quality Monitoring. The same goes for the warehouse picked on the Snowsight **Data Quality** tab: it runs what you do in the UI, not the schedules.
