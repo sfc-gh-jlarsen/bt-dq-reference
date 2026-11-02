@@ -1,0 +1,22 @@
+-- examples/notifications.sql
+-- DISABLED. Do not run this file as part of the walkthrough.
+--
+-- Native expectation violations land in the account monitoring event table.
+-- A notification integration would push those outside the account. This demo
+-- does not create one, does not email anyone, and does not post to a webhook.
+--
+-- If a later phase adds a notification, it needs:
+--   * a notification integration owned by an admin role,
+--   * an explicit destination chosen by the account owner,
+--   * and Joe's approval before anything is enabled.
+-- None of those exist here. The block below is a sketch, fully commented.
+
+-- CREATE OR REPLACE NOTIFICATION INTEGRATION bt_dq_notify
+--   TYPE = EMAIL
+--   ENABLED = FALSE
+--   ALLOWED_RECIPIENTS = ();
+--
+-- ALTER VIEW bt_latest_batch_rowcount
+--   MODIFY DATA METRIC FUNCTION SNOWFLAKE.CORE.ROW_COUNT ON ()
+--   MODIFY EXPECTATION rows_800_to_1200 (VALUE BETWEEN 800 AND 1200);
+-- -- DATA_QUALITY_NOTIFICATION is not attached. See docs before adding it.

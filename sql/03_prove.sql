@@ -1,0 +1,225 @@
+-- 03_prove.sql
+-- Manual proof. Resettable. Does not read DATA_QUALITY_MONITORING_RESULTS
+-- and does not wait for a schedule.
+--
+-- What "direct" means here, from the docs checked 2026-11-02:
+--   DUPLICATE_COUNT direct call accepts one column of a base type.
+--   A computed VARCHAR (order_id || '-' || line_no) is rejected:
+--   DUPLICATE_COUNT$V1 does not take VARCHAR(134217728).
+--   The direct call therefore passes order_id. The replay copies the same
+--   order_id values, so that call sees the duplicates. sql/02_monitors.sql
+--   still associates the DMF on (order_id, line_no), which is the documented
+--   way to measure the combination. A second proof row counts
+--   SUM(n) WHERE n > 1 grouped by both columns, and labels that row as SQL
+--   rather than as the DMF.
+--   ROW_COUNT cannot be called directly, and SYSTEM$DATA_METRIC_SCAN does not
+--   accept it (that function returns failing rows for a short DMF list, not
+--   the metric value). The row-count check is COUNT(*) on the latest-batch
+--   view, which is the set the scheduled DMF reads. The number is the same
+--   comparison the expectation makes. It is not a scheduled evaluation.
+--   FRESHNESS is a direct call. Allowed types are DATE, TIMESTAMP_LTZ,
+--   TIMESTAMP_TZ. TIMESTAMP_NTZ is rejected, so load_ts is TIMESTAMP_LTZ.
+--
+-- A PASS/FAIL of "meets expectation" on a failure-mode row is FAIL when the
+-- bad batch is outside the threshold. The good-batch rows are the opposite.
+-- The result column is that comparison, not a flipped label.
+
+USE ROLE BT_BUILDER_ROLE;
+USE WAREHOUSE BT_WH;
+USE DATABASE BT_DQ_REF;
+USE SCHEMA BT_DQ_REF;
+
+CREATE OR REPLACE TEMPORARY TABLE bt_proof (
+  check_name   VARCHAR,
+  failure_mode VARCHAR,
+  script       VARCHAR,
+  metric       VARCHAR,
+  observed     NUMBER(38, 0),
+  threshold    VARCHAR,
+  result       VARCHAR
+);
+
+-- Reset.
+BEGIN;
+DELETE FROM bt_orders;
+DELETE FROM bt_load_ledger;
+UPDATE bt_batch_id SET id = 0;
+COMMIT;
+
+-- --- good batch -----------------------------------------------------------
+BEGIN;
+UPDATE bt_batch_id SET id = id + 1;
+DELETE FROM bt_orders;
+INSERT INTO bt_orders (order_id, line_no, sku, qty, load_ts, batch_id)
+SELECT SEQ4() + 1, 1, 'SKU-' || LPAD((SEQ4() + 1)::VARCHAR, 6, '0'), 1,
+       CURRENT_TIMESTAMP(), (SELECT id FROM bt_batch_id)
+FROM TABLE(GENERATOR(ROWCOUNT => 1000));
+INSERT INTO bt_load_ledger (batch_id, batch_name, attempted_at, row_count, note)
+SELECT id, 'good', CURRENT_TIMESTAMP()::TIMESTAMP_NTZ, 1000, 'synthetic load'
+FROM bt_batch_id;
+COMMIT;
+
+INSERT INTO bt_proof
+SELECT
+  'duplicate_keys',
+  'none (good batch, unique keys)',
+  'good batch in 03_prove.sql',
+  'DUPLICATE_COUNT(order_id) direct call',
+  SNOWFLAKE.CORE.DUPLICATE_COUNT(SELECT order_id FROM bt_orders),
+  'VALUE = 0',
+  IFF(
+    SNOWFLAKE.CORE.DUPLICATE_COUNT(SELECT order_id FROM bt_orders) = 0,
+    'PASS', 'FAIL');
+
+INSERT INTO bt_proof
+SELECT
+  'latest_batch_rowcount',
+  'none (good batch, 1000 rows)',
+  'good batch in 03_prove.sql',
+  'ROW_COUNT on bt_orders_latest_batch (COUNT of the view)',
+  (SELECT COUNT(*) FROM bt_orders_latest_batch),
+  '800 <= VALUE AND VALUE <= 1200',
+  IFF(
+    (SELECT COUNT(*) FROM bt_orders_latest_batch) BETWEEN 800 AND 1200,
+    'PASS', 'FAIL');
+
+INSERT INTO bt_proof
+SELECT
+  'freshness',
+  'none (load_ts is the insert timestamp)',
+  'good batch in 03_prove.sql',
+  'FRESHNESS(load_ts) direct call',
+  SNOWFLAKE.CORE.FRESHNESS(SELECT load_ts FROM bt_orders_latest_freshness),
+  'VALUE < 900',
+  IFF(
+    SNOWFLAKE.CORE.FRESHNESS(SELECT load_ts FROM bt_orders_latest_freshness) < 900,
+    'PASS', 'FAIL');
+
+-- --- duplicate replay -----------------------------------------------------
+BEGIN;
+UPDATE bt_batch_id SET id = id + 1;
+INSERT INTO bt_orders (order_id, line_no, sku, qty, load_ts, batch_id)
+SELECT order_id, line_no, sku, qty,
+       DATEADD('minute', 5, CURRENT_TIMESTAMP()),
+       (SELECT id FROM bt_batch_id)
+FROM bt_orders
+WHERE batch_id = (SELECT MIN(batch_id) FROM bt_orders);
+INSERT INTO bt_load_ledger (batch_id, batch_name, attempted_at, row_count, note)
+SELECT id, 'duplicate_replay', CURRENT_TIMESTAMP()::TIMESTAMP_NTZ, 1000, 'synthetic load'
+FROM bt_batch_id;
+COMMIT;
+
+INSERT INTO bt_proof
+SELECT
+  'duplicate_keys',
+  'same (order_id, line_no) inserted again with a new load_ts',
+  'duplicate_replay batch in 03_prove.sql',
+  'DUPLICATE_COUNT(order_id) direct call',
+  SNOWFLAKE.CORE.DUPLICATE_COUNT(SELECT order_id FROM bt_orders),
+  'VALUE = 0',
+  IFF(
+    SNOWFLAKE.CORE.DUPLICATE_COUNT(SELECT order_id FROM bt_orders) = 0,
+    'PASS', 'FAIL');
+
+-- Same failure, both key columns. Not a DMF call. See the header comment.
+INSERT INTO bt_proof
+SELECT
+  'duplicate_keys_pair',
+  'same (order_id, line_no) inserted again with a new load_ts',
+  'duplicate_replay batch in 03_prove.sql',
+  'SQL count of rows whose (order_id, line_no) occurs more than once',
+  (SELECT COALESCE(SUM(n), 0) FROM (
+      SELECT COUNT(*) AS n
+      FROM bt_orders
+      GROUP BY order_id, line_no
+      HAVING COUNT(*) > 1)),
+  'VALUE = 0',
+  IFF(
+    (SELECT COALESCE(SUM(n), 0) FROM (
+        SELECT COUNT(*) AS n
+        FROM bt_orders
+        GROUP BY order_id, line_no
+        HAVING COUNT(*) > 1)) = 0,
+    'PASS', 'FAIL');
+
+-- --- empty attempt --------------------------------------------------------
+BEGIN;
+UPDATE bt_batch_id SET id = id + 1;
+DELETE FROM bt_orders;
+INSERT INTO bt_load_ledger (batch_id, batch_name, attempted_at, row_count, note)
+SELECT id, 'empty', CURRENT_TIMESTAMP()::TIMESTAMP_NTZ, 0, 'synthetic load'
+FROM bt_batch_id;
+COMMIT;
+
+INSERT INTO bt_proof
+SELECT
+  'latest_batch_rowcount',
+  'empty load deletes the table; ledger still records the attempt',
+  'empty batch in 03_prove.sql',
+  'ROW_COUNT on bt_orders_latest_batch (COUNT of the view)',
+  (SELECT COUNT(*) FROM bt_orders_latest_batch),
+  '800 <= VALUE AND VALUE <= 1200',
+  IFF(
+    (SELECT COUNT(*) FROM bt_orders_latest_batch) BETWEEN 800 AND 1200,
+    'PASS', 'FAIL');
+
+-- --- spike ----------------------------------------------------------------
+BEGIN;
+UPDATE bt_batch_id SET id = id + 1;
+DELETE FROM bt_orders;
+INSERT INTO bt_orders (order_id, line_no, sku, qty, load_ts, batch_id)
+SELECT SEQ4() + 1, 1, 'SKU-' || LPAD((SEQ4() + 1)::VARCHAR, 6, '0'), 1,
+       CURRENT_TIMESTAMP(), (SELECT id FROM bt_batch_id)
+FROM TABLE(GENERATOR(ROWCOUNT => 10000));
+INSERT INTO bt_load_ledger (batch_id, batch_name, attempted_at, row_count, note)
+SELECT id, 'spike', CURRENT_TIMESTAMP()::TIMESTAMP_NTZ, 10000, 'synthetic load'
+FROM bt_batch_id;
+COMMIT;
+
+INSERT INTO bt_proof
+SELECT
+  'latest_batch_rowcount',
+  'bounded spike, 10000 rows',
+  'spike batch in 03_prove.sql',
+  'ROW_COUNT on bt_orders_latest_batch (COUNT of the view)',
+  (SELECT COUNT(*) FROM bt_orders_latest_batch),
+  '800 <= VALUE AND VALUE <= 1200',
+  IFF(
+    (SELECT COUNT(*) FROM bt_orders_latest_batch) BETWEEN 800 AND 1200,
+    'PASS', 'FAIL');
+
+-- --- stale timestamp, no wait ---------------------------------------------
+-- New good batch so freshness is not measured on the empty table.
+BEGIN;
+UPDATE bt_batch_id SET id = id + 1;
+DELETE FROM bt_orders;
+INSERT INTO bt_orders (order_id, line_no, sku, qty, load_ts, batch_id)
+SELECT SEQ4() + 1, 1, 'SKU-' || LPAD((SEQ4() + 1)::VARCHAR, 6, '0'), 1,
+       DATEADD('second', -3600, CURRENT_TIMESTAMP()),
+       (SELECT id FROM bt_batch_id)
+FROM TABLE(GENERATOR(ROWCOUNT => 1000));
+INSERT INTO bt_load_ledger (batch_id, batch_name, attempted_at, row_count, note)
+SELECT id, 'stale_fixture', CURRENT_TIMESTAMP()::TIMESTAMP_NTZ, 1000,
+       'load_ts written 3600 seconds old; not a wait'
+FROM bt_batch_id;
+COMMIT;
+
+INSERT INTO bt_proof
+SELECT
+  'freshness',
+  'load_ts inserted 3600 seconds in the past',
+  'stale_fixture batch in 03_prove.sql',
+  'FRESHNESS(load_ts) direct call',
+  SNOWFLAKE.CORE.FRESHNESS(SELECT load_ts FROM bt_orders_latest_freshness),
+  'VALUE < 900',
+  IFF(
+    SNOWFLAKE.CORE.FRESHNESS(SELECT load_ts FROM bt_orders_latest_freshness) < 900,
+    'PASS', 'FAIL');
+
+SELECT check_name, failure_mode, script, metric, observed, threshold, result
+FROM bt_proof
+ORDER BY check_name, failure_mode;
+
+SELECT batch_id, batch_name, row_count
+FROM bt_load_ledger
+ORDER BY batch_id;

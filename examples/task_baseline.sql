@@ -1,0 +1,36 @@
+-- examples/task_baseline.sql
+-- DISABLED. Do not run this file as part of the walkthrough.
+--
+-- A warehouse task is not part of the default demo. The generator is plain
+-- SQL because the build role cannot create a procedure. A task body would
+-- repeat the good-batch transaction from sql/01_generate.sql. Left commented
+-- so nothing is resumed.
+--
+-- Uncommenting this also turns warehouse compute back on. Read the README
+-- cost section before doing that.
+
+-- USE ROLE BT_BUILDER_ROLE;
+-- USE WAREHOUSE BT_WH;
+-- USE DATABASE BT_DQ_REF;
+-- USE SCHEMA BT_DQ_REF;
+--
+-- CREATE OR REPLACE TASK bt_baseline_task
+--   WAREHOUSE = BT_WH
+--   SCHEDULE = 'USING CRON 0 0 * * * UTC'
+--   COMMENT = 'optional baseline reload; off unless someone runs this file'
+-- AS
+--   BEGIN
+--     BEGIN TRANSACTION;
+--     UPDATE bt_batch_id SET id = id + 1;
+--     DELETE FROM bt_orders;
+--     INSERT INTO bt_orders (order_id, line_no, sku, qty, load_ts, batch_id)
+--     SELECT SEQ4() + 1, 1, 'SKU-' || LPAD((SEQ4() + 1)::VARCHAR, 6, '0'), 1,
+--            CURRENT_TIMESTAMP(), (SELECT id FROM bt_batch_id)
+--     FROM TABLE(GENERATOR(ROWCOUNT => 1000));
+--     INSERT INTO bt_load_ledger (batch_id, batch_name, attempted_at, row_count, note)
+--     SELECT id, 'good', CURRENT_TIMESTAMP()::TIMESTAMP_NTZ, 1000, 'baseline'
+--     FROM bt_batch_id;
+--     COMMIT;
+--   END;
+--
+-- ALTER TASK bt_baseline_task SUSPEND;
