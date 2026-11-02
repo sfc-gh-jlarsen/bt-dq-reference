@@ -28,6 +28,10 @@ SHOW VIEWS;
 
 ALTER TABLE IF EXISTS IDENTIFIER($demo_db || '.' || $demo_schema || '.bt_orders')
   DROP DATA METRIC FUNCTION SNOWFLAKE.CORE.DUPLICATE_COUNT ON (order_id, line_no);
+-- The custom DMF is only created by notebooks/04_custom_dmf.ipynb.
+ALTER TABLE IF EXISTS IDENTIFIER($demo_db || '.' || $demo_schema || '.bt_orders')
+  DROP DATA METRIC FUNCTION IDENTIFIER($demo_db || '.' || $demo_schema || '.bt_positive_qty')
+  ON (qty);
 ALTER VIEW IF EXISTS IDENTIFIER($demo_db || '.' || $demo_schema || '.bt_orders_latest_batch')
   DROP DATA METRIC FUNCTION SNOWFLAKE.CORE.ROW_COUNT ON ();
 ALTER VIEW IF EXISTS IDENTIFIER($demo_db || '.' || $demo_schema || '.bt_orders_latest_freshness')
@@ -38,6 +42,8 @@ DROP VIEW IF EXISTS IDENTIFIER($demo_db || '.' || $demo_schema || '.bt_orders_la
 DROP TABLE IF EXISTS IDENTIFIER($demo_db || '.' || $demo_schema || '.bt_orders');
 DROP TABLE IF EXISTS IDENTIFIER($demo_db || '.' || $demo_schema || '.bt_load_ledger');
 DROP TABLE IF EXISTS IDENTIFIER($demo_db || '.' || $demo_schema || '.bt_batch_id');
+
+DROP FUNCTION IF EXISTS IDENTIFIER($demo_db || '.' || $demo_schema || '.bt_positive_qty')(TABLE(NUMBER));
 
 -- Examples stay commented, so these objects are not created by this repo.
 -- Uncomment only if you created them by hand.

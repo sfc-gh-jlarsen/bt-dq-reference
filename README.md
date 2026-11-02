@@ -2,7 +2,9 @@
 
 **Drop the DMF associations or they keep billing (~312 evaluations/day).** `99_teardown.sql` does that drop. Suspending the warehouse is housekeeping only and does not stop the schedules.
 
-Customer-neutral reference for three system data metric functions on synthetic order lines. The repo is the deliverable. An account deploy is a check that the SQL runs, not a second artifact.
+Customer-neutral reference for three system data metric functions on synthetic order lines, plus one custom DMF. The repo is the deliverable. An account deploy is a check that the SQL runs, not a second artifact.
+
+The walkthrough lives twice. `sql/` is the scripted form and runs with `snow sql`. `notebooks/` is the same walkthrough as Snowsight notebooks, one per step, with the SQL in SQL cells and the notes in markdown cells. Import a `.ipynb` from **Projects » Notebooks » Import**. A notebook does not inherit the `$demo_db` and `$demo_schema` session variables from `config/target.sql`, so each notebook names `BT_DQ_REF` directly.
 
 Nothing here is a customer workload. Object names start with `bt_`. Data is generated in the account and never loaded from a file.
 
@@ -41,7 +43,10 @@ SET demo_schema = 'BT_DQ_REF';
 2. `sql/01_generate.sql` runs the four batches. Optional if you only want the proof.
 3. `sql/02_monitors.sql` attaches the three DMFs and their schedules.
 4. `sql/03_prove.sql` resets the tables and prints the proof. It calls `DUPLICATE_COUNT` on `order_id` only as a contrast. The pair rows use `SYSTEM$DATA_METRIC_SCAN` on `(order_id, line_no)`. Freshness is a direct call. The row-count rows are `COUNT(*)` on the view. It does not read `DATA_QUALITY_MONITORING_RESULTS`.
-5. `sql/99_teardown.sql` is not part of the proof. It drops the DMF associations, the demo objects, and the schema named by `$demo_schema`. It does not drop the database. It suspends `BT_WH` last, as housekeeping, and never drops it, because that warehouse may be shared. The suspend is not a cost control. Dropping the associations is what stops the schedules.
+5. `notebooks/04_custom_dmf.ipynb` creates `bt_positive_qty`, a custom DMF that counts rows whose `qty` is not greater than zero. It calls the function directly (0 on a clean load, 2 after a zero and a negative quantity) and then attaches it to `bt_orders` with `EXPECTATION qty_positive (VALUE = 0)`. That association bills like the system ones. The SQL files do not create it.
+6. `notebooks/` holds the same steps as Snowsight notebooks: `00_setup`, `01_generate`, `02_monitors`, `03_prove`, `04_custom_dmf`, and `99_teardown`. Import them instead of running the SQL files when you want to walk through the checks in Snowsight.
+
+`sql/99_teardown.sql` is not part of the proof. It drops the DMF associations, the demo objects, and the schema named by `$demo_schema`. It does not drop the database. It suspends `BT_WH` last, as housekeeping, and never drops it, because that warehouse may be shared. The suspend is not a cost control. Dropping the associations is what stops the schedules.
 
 Batches, same shape in `01_generate.sql` and `03_prove.sql`:
 
@@ -85,7 +90,7 @@ Checked against Snowflake docs on 2026-11-02:
 
 ## Limitations
 
-- `99_teardown.sql` drops the DMF associations, the demo tables and views, and the schema in `$demo_schema`. `BT_BUILDER_ROLE` owns that schema, which is why `DROP SCHEMA` is in the file. The database stays. There is no `DROP DATABASE` and no `DROP WAREHOUSE`. `BT_WH` may be shared: the file suspends it at the end, as housekeeping so an idle shared warehouse is not left running. That suspend is not a cost control. Dropping the DMF associations is what stops the schedules. The file never drops the warehouse.
+- `99_teardown.sql` drops the DMF associations, including `bt_positive_qty` if the custom notebook created it, the demo tables and views, the custom function, and the schema in `$demo_schema`. `BT_BUILDER_ROLE` owns that schema, which is why `DROP SCHEMA` is in the file. The database stays. There is no `DROP DATABASE` and no `DROP WAREHOUSE`. `BT_WH` may be shared: the file suspends it at the end, as housekeeping so an idle shared warehouse is not left running. That suspend is not a cost control. Dropping the DMF associations is what stops the schedules. The file never drops the warehouse.
 - The role needs `EXECUTE DATA METRIC FUNCTION` on the account to call a system DMF. That grant is not created by this repo. It was already present on the build role.
 - `DUPLICATE_COUNT` on more than one column cannot be called directly. The docs (checked 2026-11-02) say to associate it, and `SYSTEM$DATA_METRIC_SCAN` returns the failing rows for that combination. The proof counts those rows. `DUPLICATE_COUNT(order_id)` is printed beside it and is not the pair result, because `line_no` is not always 1.
 - `ROW_COUNT` is attached to the view and scheduled. The proof measures the view with `COUNT(*)` because the DMF itself cannot be called directly and the scan function does not accept it.
@@ -103,6 +108,7 @@ The three schedules in `02_monitors.sql` keep running, and billing, until `99_te
 
 | Check | Object | Schedule | Evaluations |
 | --- | --- | --- | --- |
+| `bt_positive_qty` | `bt_orders` | the table's schedule (`TRIGGER_ON_CHANGES`) | One per DML, and only after `notebooks/04_custom_dmf.ipynb` attaches it. |
 | `DUPLICATE_COUNT` | `bt_orders` | `TRIGGER_ON_CHANGES` | One per DML on the table. A proof run writes several times, so evaluations can land after the script ends. |
 | `ROW_COUNT` | `bt_orders_latest_batch` | `5 MINUTE` | 288 per day, whether or not data changed. The standing cost. |
 | `FRESHNESS` | `bt_orders_latest_freshness` | `USING CRON 0 * * * * UTC` | 24 per day. |
