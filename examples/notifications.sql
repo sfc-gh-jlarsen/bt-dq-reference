@@ -8,7 +8,6 @@
 -- If a later phase adds a notification, it needs:
 --   * a notification integration owned by an admin role,
 --   * an explicit destination chosen by the account owner,
---   * and Joe's approval before anything is enabled.
 -- None of those exist here. The block below is a sketch, fully commented.
 
 -- CREATE OR REPLACE NOTIFICATION INTEGRATION bt_dq_notify
